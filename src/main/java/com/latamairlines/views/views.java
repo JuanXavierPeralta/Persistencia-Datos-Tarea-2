@@ -6,33 +6,53 @@ import javax.swing.JOptionPane;
 import java.util.List;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
+import com.latamairlines.dao.ClienteDAO;
+import com.latamairlines.dao.VueloDAO;
+import com.latamairlines.entities.Cliente;
+import com.latamairlines.entities.Vuelo;
+import java.time.format.DateTimeFormatter;
+import javax.swing.DefaultListCellRenderer;
+import javax.swing.JList;
+import java.awt.Component;
 
 public class views extends javax.swing.JFrame {
 
     // ACCESO A DATOS
     private final ReservaDAO dao = new ReservaDAO();
+    private final ClienteDAO clienteDAO = new ClienteDAO();
+    private final VueloDAO vueloDAO = new VueloDAO();
 
-    private static final java.util.logging.Logger logger = java.util.logging.Logger.getLogger(views.class.getName());
+    private static final java.util.logging.Logger logger
+            = java.util.logging.Logger.getLogger(views.class.getName());
 
     public views() {
 
         initComponents();
+
+        configurarTabla();
+        configurarCombos();
         setLocationRelativeTo(null);
 
-        // CONFIGURAR TABLA
-        centrarTabla();
-        mostrarReservas();
+        try {
+            cargarOpciones();
+            mostrarReservas();
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(
+                    this, "Error al cargar los datos: " + e.getMessage()
+            );
+        }
 
-        // CERRAR RECURSOS DE HIBERNATE
         addWindowListener(new java.awt.event.WindowAdapter() {
             @Override
             public void windowClosing(java.awt.event.WindowEvent e) {
                 dao.cerrar();
+                clienteDAO.cerrar();
+                vueloDAO.cerrar();
             }
         });
     }
 
-// MOSTRAR RESERVAS
+    // MOSTRAR RESERVAS
     private void mostrarReservas() {
 
         List<Reserva> reservas = dao.listarReservas();
@@ -40,16 +60,19 @@ public class views extends javax.swing.JFrame {
         DefaultTableModel modelo
                 = (DefaultTableModel) tblReservas.getModel();
 
-        // LIMPIAR TABLA
         modelo.setRowCount(0);
 
-        // CARGAR RESERVAS
-        for (Reserva r : reservas) {
+        for (Reserva reserva : reservas) {
             modelo.addRow(new Object[]{
-                r.getId(),
-                r.getOrigen(),
-                r.getDestino(),
-                r.getNumeroPasajeros()
+                reserva.getId(),
+                reserva.getCliente().getNombre(),
+                reserva.getVuelo().getCodigo(),
+                reserva.getVuelo().getOrigen(),
+                reserva.getVuelo().getDestino(),
+                reserva.getNumeroPasajeros(),
+                reserva.getPago() == null
+                ? "Pendiente"
+                : reserva.getPago().getMonto().toPlainString()
             });
         }
     }
@@ -77,18 +100,178 @@ public class views extends javax.swing.JFrame {
         renderer.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
     }
 
+    private void configurarCombos() {
+
+        cbCliente.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(
+                    JList<?> list, Object value, int index,
+                    boolean isSelected, boolean cellHasFocus) {
+
+                super.getListCellRendererComponent(
+                        list, value, index, isSelected, cellHasFocus
+                );
+
+                if (value instanceof Cliente) {
+                    Cliente cliente = (Cliente) value;
+                    setText(cliente.getNombre()
+                            + " | " + cliente.getIdentificacion());
+                } else {
+                    setText("Seleccione un cliente");
+                }
+
+                return this;
+            }
+        });
+
+        cbVuelo.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(
+                    JList<?> list, Object value, int index,
+                    boolean isSelected, boolean cellHasFocus) {
+
+                super.getListCellRendererComponent(
+                        list, value, index, isSelected, cellHasFocus
+                );
+
+                if (value instanceof Vuelo) {
+                    Vuelo vuelo = (Vuelo) value;
+
+                    String fecha = vuelo.getFechaSalida().format(
+                            DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")
+                    );
+
+                    setText(vuelo.getCodigo()
+                            + " | " + vuelo.getOrigen()
+                            + " → " + vuelo.getDestino()
+                            + " | " + fecha);
+                } else {
+                    setText("Seleccione un vuelo");
+                }
+
+                return this;
+            }
+        });
+    }
+
+    private void cargarOpciones() {
+
+        // CONSULTAR ANTES DE MODIFICAR LOS COMBOS
+        List<Cliente> clientes = clienteDAO.listarClientes();
+        List<Vuelo> vuelos = vueloDAO.listarVuelos();
+
+        cbCliente.removeAllItems();
+        for (Cliente cliente : clientes) {
+            cbCliente.addItem(cliente);
+        }
+
+        cbVuelo.removeAllItems();
+        for (Vuelo vuelo : vuelos) {
+            cbVuelo.addItem(vuelo);
+        }
+
+        cbCliente.setSelectedIndex(-1);
+        cbVuelo.setSelectedIndex(-1);
+    }
+
+    private void configurarTabla() {
+
+        tblReservas.setModel(new DefaultTableModel(
+                new Object[]{
+                    "ID", "Cliente", "Vuelo",
+                    "Origen", "Destino", "Pasajeros", "Pago"
+                }, 0
+        ) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+
+            @Override
+            public Class<?> getColumnClass(int columnIndex) {
+                if (columnIndex == 0 || columnIndex == 5) {
+                    return Integer.class;
+                }
+                return String.class;
+            }
+        });
+
+        tblReservas.setRowHeight(28);
+        centrarTabla();
+    }
+
+    private void limpiarCampos() {
+        tfID.setText("");
+        tfNumPasajeros.setText("");
+        cbCliente.setSelectedIndex(-1);
+        cbVuelo.setSelectedIndex(-1);
+    }
+
+    private int leerEnteroPositivo(String texto, String campo) {
+
+        try {
+            int valor = Integer.parseInt(texto.trim());
+
+            if (valor <= 0) {
+                throw new NumberFormatException();
+            }
+
+            return valor;
+
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    campo + " debe ser un número entero mayor a cero"
+            );
+        }
+    }
+
+    private void seleccionarCliente(Integer id) {
+
+        cbCliente.setSelectedIndex(-1);
+
+        for (int i = 0; i < cbCliente.getItemCount(); i++) {
+            if (cbCliente.getItemAt(i).getId().equals(id)) {
+                cbCliente.setSelectedIndex(i);
+                return;
+            }
+        }
+    }
+
+    private void seleccionarVuelo(Integer id) {
+
+        cbVuelo.setSelectedIndex(-1);
+
+        for (int i = 0; i < cbVuelo.getItemCount(); i++) {
+            if (cbVuelo.getItemAt(i).getId().equals(id)) {
+                cbVuelo.setSelectedIndex(i);
+                return;
+            }
+        }
+    }
+
+    private void refrescarTabla() {
+        try {
+            mostrarReservas();
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "La operación se completó, pero no se pudo "
+                    + "actualizar la tabla: " + e.getMessage()
+            );
+        }
+    }
+
+    /////////////////////////////////////////////////////////////////////////////////////////////
     @SuppressWarnings("unchecked")
     // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
     private void initComponents() {
 
         labelLATAMAIRLINES = new javax.swing.JLabel();
-        labelDESTINO = new javax.swing.JLabel();
+        labelVUELO = new javax.swing.JLabel();
         labelNUMPASAJEROS = new javax.swing.JLabel();
-        labelORIGEN = new javax.swing.JLabel();
+        labelCLIENTE = new javax.swing.JLabel();
         labelID = new javax.swing.JLabel();
         tfID = new javax.swing.JTextField();
-        tfOrigen = new javax.swing.JTextField();
-        tfDestino = new javax.swing.JTextField();
         tfNumPasajeros = new javax.swing.JTextField();
         btnActualizar = new javax.swing.JButton();
         btnCrear = new javax.swing.JButton();
@@ -98,6 +281,8 @@ public class views extends javax.swing.JFrame {
         jScrollPane1 = new javax.swing.JScrollPane();
         tblReservas = new javax.swing.JTable();
         labelREGISTRORESERVAS = new javax.swing.JLabel();
+        cbCliente = new javax.swing.JComboBox<>();
+        cbVuelo = new javax.swing.JComboBox<>();
 
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
 
@@ -106,24 +291,19 @@ public class views extends javax.swing.JFrame {
         labelLATAMAIRLINES.setForeground(new java.awt.Color(0, 0, 0));
         labelLATAMAIRLINES.setText("LATAM Airlines | Gestión de reservas");
 
-        labelDESTINO.setFont(new java.awt.Font("Bahnschrift", 1, 18)); // NOI18N
-        labelDESTINO.setText("Destino");
+        labelVUELO.setFont(new java.awt.Font("Bahnschrift", 1, 18)); // NOI18N
+        labelVUELO.setText("Vuelo");
 
         labelNUMPASAJEROS.setFont(new java.awt.Font("Bahnschrift", 1, 18)); // NOI18N
         labelNUMPASAJEROS.setText("Número de Pasajeros");
 
-        labelORIGEN.setFont(new java.awt.Font("Bahnschrift", 1, 18)); // NOI18N
-        labelORIGEN.setText("Origen");
+        labelCLIENTE.setFont(new java.awt.Font("Bahnschrift", 1, 18)); // NOI18N
+        labelCLIENTE.setText("Cliente");
 
         labelID.setFont(new java.awt.Font("Bahnschrift", 1, 18)); // NOI18N
         labelID.setText("ID de Reserva");
 
         tfID.setFont(new java.awt.Font("Bahnschrift", 0, 18)); // NOI18N
-
-        tfOrigen.setFont(new java.awt.Font("Bahnschrift", 0, 18)); // NOI18N
-        tfOrigen.addActionListener(this::tfOrigenActionPerformed);
-
-        tfDestino.setFont(new java.awt.Font("Bahnschrift", 0, 18)); // NOI18N
 
         tfNumPasajeros.setFont(new java.awt.Font("Bahnschrift", 0, 18)); // NOI18N
 
@@ -153,14 +333,14 @@ public class views extends javax.swing.JFrame {
 
             },
             new String [] {
-                "ID", "Origen", "Destino", "Pasajeros"
+                "ID", "Cliente", "Vuelo", "Origen", "Destino", "Pasajeros", "Pago"
             }
         ) {
             Class[] types = new Class [] {
-                java.lang.Integer.class, java.lang.String.class, java.lang.String.class, java.lang.Integer.class
+                java.lang.Integer.class, java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.Integer.class, java.lang.String.class
             };
             boolean[] canEdit = new boolean [] {
-                false, false, false, false
+                false, false, false, false, false, false, false
             };
 
             public Class getColumnClass(int columnIndex) {
@@ -171,11 +351,14 @@ public class views extends javax.swing.JFrame {
                 return canEdit [columnIndex];
             }
         });
+        tblReservas.setToolTipText("");
         jScrollPane1.setViewportView(tblReservas);
 
         labelREGISTRORESERVAS.setFont(new java.awt.Font("Bahnschrift", 1, 24)); // NOI18N
         labelREGISTRORESERVAS.setForeground(new java.awt.Color(0, 0, 0));
         labelREGISTRORESERVAS.setText("Registro de Reservas");
+
+        cbCliente.addActionListener(this::cbClienteActionPerformed);
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
         getContentPane().setLayout(layout);
@@ -192,17 +375,16 @@ public class views extends javax.swing.JFrame {
                             .addComponent(labelNUMPASAJEROS, javax.swing.GroupLayout.DEFAULT_SIZE, 822, Short.MAX_VALUE)
                             .addGroup(layout.createSequentialGroup()
                                 .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(labelORIGEN, javax.swing.GroupLayout.PREFERRED_SIZE, 95, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addComponent(tfOrigen, javax.swing.GroupLayout.PREFERRED_SIZE, 290, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addComponent(tfNumPasajeros, javax.swing.GroupLayout.PREFERRED_SIZE, 290, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                    .addComponent(labelCLIENTE, javax.swing.GroupLayout.PREFERRED_SIZE, 95, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                    .addComponent(tfNumPasajeros, javax.swing.GroupLayout.PREFERRED_SIZE, 290, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                    .addComponent(cbCliente, javax.swing.GroupLayout.PREFERRED_SIZE, 290, javax.swing.GroupLayout.PREFERRED_SIZE))
                                 .addGap(51, 51, 51)
                                 .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                                        .addComponent(tfDestino)
-                                        .addComponent(labelDESTINO, javax.swing.GroupLayout.PREFERRED_SIZE, 290, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                    .addComponent(labelVUELO, javax.swing.GroupLayout.PREFERRED_SIZE, 290, javax.swing.GroupLayout.PREFERRED_SIZE)
                                     .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
                                         .addComponent(labelID, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                        .addComponent(tfID, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.PREFERRED_SIZE, 290, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                                        .addComponent(tfID, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.PREFERRED_SIZE, 290, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                    .addComponent(cbVuelo, javax.swing.GroupLayout.PREFERRED_SIZE, 290, javax.swing.GroupLayout.PREFERRED_SIZE))
                                 .addGap(21, 21, 21))))
                     .addGroup(layout.createSequentialGroup()
                         .addGap(165, 165, 165)
@@ -221,27 +403,24 @@ public class views extends javax.swing.JFrame {
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(layout.createSequentialGroup()
                 .addComponent(labelLATAMAIRLINES, javax.swing.GroupLayout.PREFERRED_SIZE, 68, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(labelVUELO)
+                    .addComponent(labelCLIENTE, javax.swing.GroupLayout.PREFERRED_SIZE, 34, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(cbCliente, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(cbVuelo, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(2, 2, 2)
                 .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                        .addComponent(labelDESTINO)
-                        .addComponent(labelORIGEN, javax.swing.GroupLayout.PREFERRED_SIZE, 34, javax.swing.GroupLayout.PREFERRED_SIZE))
                     .addGroup(layout.createSequentialGroup()
-                        .addGap(35, 35, 35)
-                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                            .addComponent(tfOrigen, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(tfDestino, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))))
-                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(layout.createSequentialGroup()
-                        .addGap(37, 37, 37)
+                        .addGap(43, 43, 43)
                         .addComponent(labelNUMPASAJEROS, javax.swing.GroupLayout.PREFERRED_SIZE, 34, javax.swing.GroupLayout.PREFERRED_SIZE))
-                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                        .addComponent(labelID, javax.swing.GroupLayout.PREFERRED_SIZE, 34, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                    .addComponent(labelID, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 34, javax.swing.GroupLayout.PREFERRED_SIZE))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(tfNumPasajeros, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                     .addComponent(tfID, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 60, Short.MAX_VALUE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 54, Short.MAX_VALUE)
                 .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(btnBuscar)
                     .addComponent(btnActualizar)
@@ -260,148 +439,147 @@ public class views extends javax.swing.JFrame {
     private void btnCrearActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnCrearActionPerformed
 
         try {
+            Cliente cliente = (Cliente) cbCliente.getSelectedItem();
+            Vuelo vuelo = (Vuelo) cbVuelo.getSelectedItem();
 
-            // OBTENER DATOS
-            String origen = tfOrigen.getText().trim();
-            String destino = tfDestino.getText().trim();
-            String textoPasajeros = tfNumPasajeros.getText().trim();
-
-            // VALIDAR CAMPOS
-            if (origen.isEmpty() || destino.isEmpty()
-                    || textoPasajeros.isEmpty()) {
-
-                JOptionPane.showMessageDialog(this, "Complete todos los campos");
+            if (cliente == null || vuelo == null) {
+                JOptionPane.showMessageDialog(
+                        this, "Seleccione un cliente y un vuelo"
+                );
                 return;
             }
 
-            int pasajeros = Integer.parseInt(textoPasajeros);
+            int pasajeros = leerEnteroPositivo(
+                    tfNumPasajeros.getText(), "El número de pasajeros"
+            );
 
-            if (pasajeros <= 0) {
-                JOptionPane.showMessageDialog(this,
-                        "El número de pasajeros debe ser mayor a cero");
-                return;
-            }
-
-            // CREAR RESERVA
-            Reserva reserva = new Reserva(origen, destino, pasajeros);
+            Reserva reserva = new Reserva(cliente, vuelo, pasajeros);
             dao.crearReserva(reserva);
-            mostrarReservas();
 
-            JOptionPane.showMessageDialog(this, "Reserva creada correctamente");
+            limpiarCampos();
 
-            // LIMPIAR CAMPOS
-            tfOrigen.setText("");
-            tfDestino.setText("");
-            tfNumPasajeros.setText("");
-            tfID.setText("");
-
-        } catch (NumberFormatException e) {
-            JOptionPane.showMessageDialog(this,
-                    "Ingrese un número válido de pasajeros");
+            JOptionPane.showMessageDialog(
+                    this, "Reserva creada correctamente"
+            );
 
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(this,
-                    "Error al crear reserva: " + e.getMessage());
+            JOptionPane.showMessageDialog(
+                    this, "Error al crear reserva: " + e.getMessage()
+            );
+            return;
         }
+
+        refrescarTabla();
 
     }//GEN-LAST:event_btnCrearActionPerformed
 
-    private void tfOrigenActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_tfOrigenActionPerformed
-    }//GEN-LAST:event_tfOrigenActionPerformed
-
     private void btnMostrarActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnMostrarActionPerformed
-        mostrarReservas();
-    }//GEN-LAST:event_btnMostrarActionPerformed
+        try {
+            cargarOpciones();
+            mostrarReservas();
+            limpiarCampos();
+
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(
+                    this, "Error al cargar los datos: " + e.getMessage()
+            );
+}    }//GEN-LAST:event_btnMostrarActionPerformed
 
     private void btnBuscarActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnBuscarActionPerformed
 
         try {
+            int id = leerEnteroPositivo(
+                    tfID.getText(), "El ID de reserva"
+            );
 
-            // OBTENER ID
-            int id = Integer.parseInt(tfID.getText().trim());
-
-            // BUSCAR RESERVA
             Reserva reserva = dao.buscarPorId(id);
 
-            if (reserva != null) {
-
-                // MOSTRAR DATOS
-                tfOrigen.setText(reserva.getOrigen());
-                tfDestino.setText(reserva.getDestino());
-                tfNumPasajeros.setText(
-                        String.valueOf(reserva.getNumeroPasajeros()));
-
-            } else {
-                JOptionPane.showMessageDialog(this,
-                        "Reserva no encontrada");
+            if (reserva == null) {
+                JOptionPane.showMessageDialog(
+                        this, "Reserva no encontrada"
+                );
+                return;
             }
 
-        } catch (NumberFormatException e) {
-            JOptionPane.showMessageDialog(this,
-                    "Ingrese un ID válido");
+            cargarOpciones();
+
+            seleccionarCliente(reserva.getCliente().getId());
+            seleccionarVuelo(reserva.getVuelo().getId());
+
+            tfNumPasajeros.setText(
+                    String.valueOf(reserva.getNumeroPasajeros())
+            );
 
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(this,
-                    "Error al buscar reserva: " + e.getMessage());
+            JOptionPane.showMessageDialog(
+                    this, "Error al buscar reserva: " + e.getMessage()
+            );
         }
     }//GEN-LAST:event_btnBuscarActionPerformed
 
     private void btnActualizarActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnActualizarActionPerformed
 
         try {
+            int id = leerEnteroPositivo(
+                    tfID.getText(), "El ID de reserva"
+            );
 
-            // OBTENER DATOS
-            int id = Integer.parseInt(tfID.getText().trim());
-            String origen = tfOrigen.getText().trim();
-            String destino = tfDestino.getText().trim();
-            int pasajeros = Integer.parseInt(tfNumPasajeros.getText().trim());
+            Cliente cliente = (Cliente) cbCliente.getSelectedItem();
+            Vuelo vuelo = (Vuelo) cbVuelo.getSelectedItem();
 
-            // VALIDAR DATOS
-            if (id <= 0 || origen.isEmpty() || destino.isEmpty()
-                    || pasajeros <= 0) {
-                JOptionPane.showMessageDialog(this, "Ingrese datos válidos");
+            if (cliente == null || vuelo == null) {
+                JOptionPane.showMessageDialog(
+                        this, "Seleccione un cliente y un vuelo"
+                );
                 return;
             }
 
-            // ACTUALIZAR RESERVA
-            dao.actualizarReserva(id, origen, destino, pasajeros);
-            mostrarReservas();
+            int pasajeros = leerEnteroPositivo(
+                    tfNumPasajeros.getText(), "El número de pasajeros"
+            );
 
-            JOptionPane.showMessageDialog(this,
-                    "Reserva actualizada correctamente");
+            dao.actualizarReserva(id, cliente, vuelo, pasajeros);
 
-        } catch (NumberFormatException e) {
-            JOptionPane.showMessageDialog(this,
-                    "Ingrese un ID y número de pasajeros válidos");
+            JOptionPane.showMessageDialog(
+                    this, "Reserva actualizada correctamente"
+            );
 
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(this,
-                    "Error al actualizar: " + e.getMessage());
+            JOptionPane.showMessageDialog(
+                    this, "Error al actualizar reserva: " + e.getMessage()
+            );
+            return;
         }
+
+        refrescarTabla();
 
     }//GEN-LAST:event_btnActualizarActionPerformed
 
     private void btnEliminarActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnEliminarActionPerformed
 
         try {
+            int id = leerEnteroPositivo(
+                    tfID.getText(), "El ID de reserva"
+            );
 
-            // OBTENER ID
-            int id = Integer.parseInt(tfID.getText().trim());
-
-            if (id <= 0) {
-                JOptionPane.showMessageDialog(this, "Ingrese un ID válido");
-                return;
-            }
-
-            // VERIFICAR RESERVA
             Reserva reserva = dao.buscarPorId(id);
 
             if (reserva == null) {
-                JOptionPane.showMessageDialog(this, "Reserva no encontrada");
+                JOptionPane.showMessageDialog(
+                        this, "Reserva no encontrada"
+                );
                 return;
             }
 
-            // CONFIRMAR ELIMINACIÓN
+            if (reserva.getPago() != null) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "La reserva tiene un pago registrado. "
+                        + "Elimine primero el pago."
+                );
+                return;
+            }
+
             int confirmar = JOptionPane.showConfirmDialog(
                     this,
                     "¿Desea eliminar la reserva " + id + "?",
@@ -413,29 +591,27 @@ public class views extends javax.swing.JFrame {
                 return;
             }
 
-            // ELIMINAR RESERVA
             dao.eliminarReserva(id);
-            mostrarReservas();
+            limpiarCampos();
 
-            // LIMPIAR CAMPOS
-            tfID.setText("");
-            tfOrigen.setText("");
-            tfDestino.setText("");
-            tfNumPasajeros.setText("");
-
-            JOptionPane.showMessageDialog(this,
-                    "Reserva eliminada correctamente");
-
-        } catch (NumberFormatException e) {
-            JOptionPane.showMessageDialog(this,
-                    "Ingrese un ID numérico válido");
+            JOptionPane.showMessageDialog(
+                    this, "Reserva eliminada correctamente"
+            );
 
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(this,
-                    "Error al eliminar reserva: " + e.getMessage());
+            JOptionPane.showMessageDialog(
+                    this, "Error al eliminar reserva: " + e.getMessage()
+            );
+            return;
         }
 
+        refrescarTabla();
+
     }//GEN-LAST:event_btnEliminarActionPerformed
+
+    private void cbClienteActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_cbClienteActionPerformed
+        // TODO add your handling code here:
+    }//GEN-LAST:event_cbClienteActionPerformed
 
     public static void main(String args[]) {
         /* Set the Nimbus look and feel */
@@ -465,17 +641,17 @@ public class views extends javax.swing.JFrame {
     private javax.swing.JButton btnCrear;
     private javax.swing.JButton btnEliminar;
     private javax.swing.JButton btnMostrar;
+    private javax.swing.JComboBox<Cliente> cbCliente;
+    private javax.swing.JComboBox<Vuelo> cbVuelo;
     private javax.swing.JScrollPane jScrollPane1;
-    private javax.swing.JLabel labelDESTINO;
+    private javax.swing.JLabel labelCLIENTE;
     private javax.swing.JLabel labelID;
     private javax.swing.JLabel labelLATAMAIRLINES;
     private javax.swing.JLabel labelNUMPASAJEROS;
-    private javax.swing.JLabel labelORIGEN;
     private javax.swing.JLabel labelREGISTRORESERVAS;
+    private javax.swing.JLabel labelVUELO;
     private javax.swing.JTable tblReservas;
-    private javax.swing.JTextField tfDestino;
     private javax.swing.JTextField tfID;
     private javax.swing.JTextField tfNumPasajeros;
-    private javax.swing.JTextField tfOrigen;
     // End of variables declaration//GEN-END:variables
 }

@@ -1,6 +1,8 @@
 package com.latamairlines.dao;
 
+import com.latamairlines.entities.Cliente;
 import com.latamairlines.entities.Reserva;
+import com.latamairlines.entities.Vuelo;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.Persistence;
@@ -8,79 +10,56 @@ import java.util.List;
 
 public class ReservaDAO {
 
-    private final EntityManagerFactory emf = Persistence.createEntityManagerFactory("LatamAirlinesPU");
+    private final EntityManagerFactory emf =
+            Persistence.createEntityManagerFactory("LatamAirlinesPU");
 
+    // CREAR RESERVA
     public void crearReserva(Reserva reserva) {
 
-        EntityManager manager = emf.createEntityManager();
-
-        try {
-            manager.getTransaction().begin();
-            manager.persist(reserva);
-            manager.getTransaction().commit();
-            System.out.println("Reserva creada correctamente");
-
-        } catch (Exception e) {
-
-            if (manager.getTransaction().isActive()) {
-                manager.getTransaction().rollback();
-            }
-
-            throw e;
-
-        } finally {
-            manager.close();
+        if (reserva == null) {
+            throw new IllegalArgumentException("La reserva es obligatoria");
         }
-    }
 
-    public Reserva buscarPorId(int id) {
-
-        EntityManager em = emf.createEntityManager();
-
-        try {
-            return em.find(Reserva.class, id);
-        } finally {
-            em.close();
+        if (reserva.getId() != null) {
+            throw new IllegalArgumentException("La reserva ya tiene un ID");
         }
-    }
 
-    public List<Reserva> listarReservas() {
-
-        EntityManager em = emf.createEntityManager();
-
-        try {
-            return em.createQuery(
-                    "SELECT r FROM Reserva r", Reserva.class
-            ).getResultList();
-
-        } finally {
-            em.close();
-        }
-    }
-
-    public void actualizarReserva(int id, String origen,
-            String destino, int pasajeros) {
+        validarDatos(
+                reserva.getCliente(),
+                reserva.getVuelo(),
+                reserva.getNumeroPasajeros()
+        );
 
         EntityManager em = emf.createEntityManager();
 
         try {
             em.getTransaction().begin();
 
-            Reserva reserva = em.find(Reserva.class, id);
+            // BUSCAR CLIENTE Y VUELO EN LA BASE DE DATOS
+            Cliente cliente = em.find(
+                    Cliente.class, reserva.getCliente().getId()
+            );
 
-            if (reserva != null) {
+            Vuelo vuelo = em.find(
+                    Vuelo.class, reserva.getVuelo().getId()
+            );
 
-                // ACTUALIZAR DATOS
-                reserva.setOrigen(origen);
-                reserva.setDestino(destino);
-                reserva.setNumeroPasajeros(pasajeros);
-
-                em.getTransaction().commit();
-
-            } else {
-                em.getTransaction().rollback();
-                throw new IllegalArgumentException("Reserva no encontrada");
+            if (cliente == null) {
+                throw new IllegalArgumentException("Cliente no encontrado");
             }
+
+            if (vuelo == null) {
+                throw new IllegalArgumentException("Vuelo no encontrado");
+            }
+
+            // ASOCIAR OBJETOS ADMINISTRADOS
+            reserva.setCliente(cliente);
+            reserva.setVuelo(vuelo);
+
+            em.persist(reserva);
+            em.getTransaction().commit();
+
+            System.out.println("Reserva creada correctamente");
 
         } catch (Exception e) {
             if (em.getTransaction().isActive()) {
@@ -93,6 +72,103 @@ public class ReservaDAO {
         }
     }
 
+    // BUSCAR RESERVA POR ID
+    public Reserva buscarPorId(int id) {
+
+        EntityManager em = emf.createEntityManager();
+
+        try {
+            List<Reserva> resultados = em.createQuery(
+                    "SELECT r FROM Reserva r "
+                    + "JOIN FETCH r.cliente "
+                    + "JOIN FETCH r.vuelo "
+                    + "LEFT JOIN FETCH r.pago "
+                    + "WHERE r.id = :id",
+                    Reserva.class
+            )
+                    .setParameter("id", id)
+                    .getResultList();
+
+            return resultados.isEmpty() ? null : resultados.get(0);
+
+        } finally {
+            em.close();
+        }
+    }
+
+    // LISTAR RESERVAS CON CLIENTE, VUELO Y PAGO
+    public List<Reserva> listarReservas() {
+
+        EntityManager em = emf.createEntityManager();
+
+        try {
+            return em.createQuery(
+                    "SELECT r FROM Reserva r "
+                    + "JOIN FETCH r.cliente "
+                    + "JOIN FETCH r.vuelo "
+                    + "LEFT JOIN FETCH r.pago "
+                    + "ORDER BY r.id",
+                    Reserva.class
+            ).getResultList();
+
+        } finally {
+            em.close();
+        }
+    }
+
+    // ACTUALIZAR RESERVA
+    public void actualizarReserva(int id, Cliente cliente,
+                                  Vuelo vuelo, int pasajeros) {
+
+        validarDatos(cliente, vuelo, pasajeros);
+
+        EntityManager em = emf.createEntityManager();
+
+        try {
+            em.getTransaction().begin();
+
+            Reserva reserva = em.find(Reserva.class, id);
+
+            if (reserva == null) {
+                throw new IllegalArgumentException("Reserva no encontrada");
+            }
+
+            Cliente clienteRegistrado = em.find(
+                    Cliente.class, cliente.getId()
+            );
+
+            Vuelo vueloRegistrado = em.find(
+                    Vuelo.class, vuelo.getId()
+            );
+
+            if (clienteRegistrado == null) {
+                throw new IllegalArgumentException("Cliente no encontrado");
+            }
+
+            if (vueloRegistrado == null) {
+                throw new IllegalArgumentException("Vuelo no encontrado");
+            }
+
+            reserva.setCliente(clienteRegistrado);
+            reserva.setVuelo(vueloRegistrado);
+            reserva.setNumeroPasajeros(pasajeros);
+
+            em.getTransaction().commit();
+
+            System.out.println("Reserva actualizada correctamente");
+
+        } catch (Exception e) {
+            if (em.getTransaction().isActive()) {
+                em.getTransaction().rollback();
+            }
+            throw e;
+
+        } finally {
+            em.close();
+        }
+    }
+
+    // ELIMINAR RESERVA
     public void eliminarReserva(int id) {
 
         EntityManager em = emf.createEntityManager();
@@ -102,26 +178,26 @@ public class ReservaDAO {
 
             Reserva reserva = em.find(Reserva.class, id);
 
-            if (reserva != null) {
-
-                em.remove(reserva);
-
-                em.getTransaction().commit();
-
-                System.out.println("Reserva eliminada correctamente");
-
-            } else {
-
-                System.out.println("Reserva no encontrada");
-                em.getTransaction().rollback();
+            if (reserva == null) {
+                throw new IllegalArgumentException("Reserva no encontrada");
             }
 
-        } catch (Exception e) {
+            // EVITAR ELIMINAR UNA RESERVA CON UN PAGO REGISTRADO
+            if (reserva.getPago() != null) {
+                throw new IllegalArgumentException(
+                        "No se puede eliminar una reserva con pago registrado"
+                );
+            }
 
+            em.remove(reserva);
+            em.getTransaction().commit();
+
+            System.out.println("Reserva eliminada correctamente");
+
+        } catch (Exception e) {
             if (em.getTransaction().isActive()) {
                 em.getTransaction().rollback();
             }
-
             throw e;
 
         } finally {
@@ -129,7 +205,33 @@ public class ReservaDAO {
         }
     }
 
+    // VALIDAR DATOS DE LA RESERVA
+    private void validarDatos(Cliente cliente, Vuelo vuelo,
+                              Integer pasajeros) {
+
+        if (cliente == null || cliente.getId() == null) {
+            throw new IllegalArgumentException(
+                    "Seleccione un cliente registrado"
+            );
+        }
+
+        if (vuelo == null || vuelo.getId() == null) {
+            throw new IllegalArgumentException(
+                    "Seleccione un vuelo registrado"
+            );
+        }
+
+        if (pasajeros == null || pasajeros <= 0) {
+            throw new IllegalArgumentException(
+                    "El número de pasajeros debe ser mayor a cero"
+            );
+        }
+    }
+
+    // CERRAR RECURSOS
     public void cerrar() {
-        emf.close();
+        if (emf.isOpen()) {
+            emf.close();
+        }
     }
 }
